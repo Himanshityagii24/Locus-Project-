@@ -3,6 +3,7 @@ A modern, responsive web application for managing canteen orders with real-time 
 
 
 ✨Features:
+
 🛒 Shopping Cart
 
 Add items to cart with real-time stock validation
@@ -113,8 +114,11 @@ Reorder previous orders with one click
 🛠️ Technologies Used
 
 React - Frontend framework
+
 Lucide React - Icon library
+
 Tailwind CSS - Utility-first CSS framework
+
 JavaScript ES6+ - Modern JavaScript features
 
 
@@ -124,4 +128,5 @@ JavaScript ES6+ - Modern JavaScript features
 ISHITA GUPTA
 
 GitHub: ISHITA1004
+
 Email: ishita.gupta0425@gmail.com

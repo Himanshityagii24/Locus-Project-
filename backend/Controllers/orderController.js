@@ -1,13 +1,18 @@
 const Order = require('../models/Order');
 const MenuItem = require('../models/MenuItem');
+const mongoose = require('mongoose');
 
-// Creating a new order
+// Create a new order
 const createOrder = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { user_id, items } = req.body;
 
     // Validation
     if (!user_id) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: 'User ID is required'
@@ -15,28 +20,22 @@ const createOrder = async (req, res, next) => {
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: 'Order must contain at least one item'
       });
     }
 
-    // Validate each item and calculate total
+    // Validate items and calculate total
     let total_amount = 0;
-    const validatedItems = [];
+    const orderItems = [];
 
     for (const item of items) {
-      if (!item.menu_item_id || !item.quantity || item.quantity <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Each item must have menu_item_id and valid quantity'
-        });
-      }
-
-      // Check if menu item exists and has sufficient stock
-      const menuItem = await MenuItem.findById(item.menu_item_id);
+      const menuItem = await MenuItem.findById(item.menu_item_id).session(session);
       
       if (!menuItem) {
+        await session.abortTransaction();
         return res.status(404).json({
           success: false,
           message: `Menu item with ID ${item.menu_item_id} not found`
@@ -44,14 +43,21 @@ const createOrder = async (req, res, next) => {
       }
 
       if (!menuItem.is_available || menuItem.stock_count < item.quantity) {
+        await session.abortTransaction();
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${menuItem.name}. Available: ${menuItem.stock_count}`
         });
       }
 
-      validatedItems.push({
-        menu_item_id: item.menu_item_id,
+      // Decrement stock
+      menuItem.stock_count -= item.quantity;
+      menuItem.is_available = menuItem.stock_count > 0;
+      await menuItem.save({ session });
+
+      orderItems.push({
+        menu_item_id: menuItem._id,
+        menu_item_name: menuItem.name,
         quantity: item.quantity,
         price: menuItem.price
       });
@@ -59,36 +65,38 @@ const createOrder = async (req, res, next) => {
       total_amount += menuItem.price * item.quantity;
     }
 
-    // Creating order with transaction (stock will be locked automatically)
-    const order = await Order.create({
-      user_id,
-      items: validatedItems,
-      total_amount
-    });
+    // Set auto-cancel time to 15 minutes from now
+    const autoCancelAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    // Fetch complete order details
-    const completeOrder = await Order.findById(order.id);
+    // Create order
+    const order = await Order.create([{
+      user_id,
+      items: orderItems,
+      total_amount,
+      auto_cancel_at: autoCancelAt
+    }], { session });
+
+    await session.commitTransaction();
 
     res.status(201).json({
       success: true,
       message: 'Order created successfully. Please complete payment within 15 minutes.',
-      data: completeOrder
+      data: order[0]
     });
   } catch (error) {
-    if (error.message.includes('Insufficient stock')) {
-      return res.status(400).json({
-        success: false,
-        message: error.message
-      });
-    }
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
 
 // Get all orders
 const getAllOrders = async (req, res, next) => {
   try {
-    const orders = await Order.findAll();
+    const orders = await Order.find()
+      .populate('user_id', 'name email')
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -104,7 +112,7 @@ const getAllOrders = async (req, res, next) => {
 const getOrderById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).populate('user_id', 'name email');
 
     if (!order) {
       return res.status(404).json({
@@ -126,7 +134,7 @@ const getOrderById = async (req, res, next) => {
 const getOrdersByUserId = async (req, res, next) => {
   try {
     const { user_id } = req.params;
-    const orders = await Order.findByUserId(user_id);
+    const orders = await Order.find({ user_id }).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -143,8 +151,8 @@ const completePayment = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Checking if order exists
     const order = await Order.findById(id);
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -152,7 +160,6 @@ const completePayment = async (req, res, next) => {
       });
     }
 
-    // Checking if order is still pending
     if (order.status !== 'pending') {
       return res.status(400).json({
         success: false,
@@ -160,13 +167,14 @@ const completePayment = async (req, res, next) => {
       });
     }
 
-    // Updating order status
-    const updatedOrder = await Order.updateStatus(id, 'paid', 'payment_completed_at');
+    order.status = 'paid';
+    order.payment_completed_at = new Date();
+    await order.save();
 
     res.status(200).json({
       success: true,
       message: 'Payment completed successfully',
-      data: updatedOrder
+      data: order
     });
   } catch (error) {
     next(error);
@@ -178,8 +186,8 @@ const completePickup = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Checking if order exists
     const order = await Order.findById(id);
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -187,7 +195,6 @@ const completePickup = async (req, res, next) => {
       });
     }
 
-    // Checking if payment is completed
     if (order.status !== 'paid') {
       return res.status(400).json({
         success: false,
@@ -195,13 +202,14 @@ const completePickup = async (req, res, next) => {
       });
     }
 
-    // Updating order status
-    const updatedOrder = await Order.updateStatus(id, 'completed', 'pickup_completed_at');
+    order.status = 'completed';
+    order.pickup_completed_at = new Date();
+    await order.save();
 
     res.status(200).json({
       success: true,
       message: 'Order completed successfully',
-      data: updatedOrder
+      data: order
     });
   } catch (error) {
     next(error);
@@ -210,36 +218,56 @@ const completePickup = async (req, res, next) => {
 
 // Cancel order
 const cancelOrder = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { id } = req.params;
 
-    // Checking if order exists
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).session(session);
+
     if (!order) {
+      await session.abortTransaction();
       return res.status(404).json({
         success: false,
         message: 'Order not found'
       });
     }
 
-    // Check if order can be cancelled
     if (order.status === 'completed' || order.status === 'cancelled') {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: `Cannot cancel order. Order is already ${order.status}`
       });
     }
 
-    // Canceling order (stock will be restored automatically)
-    const cancelledOrder = await Order.cancel(id);
+    // Restore stock
+    for (const item of order.items) {
+      const menuItem = await MenuItem.findById(item.menu_item_id).session(session);
+      if (menuItem) {
+        menuItem.stock_count += item.quantity;
+        menuItem.is_available = true;
+        await menuItem.save({ session });
+      }
+    }
+
+    order.status = 'cancelled';
+    order.cancelled_at = new Date();
+    await order.save({ session });
+
+    await session.commitTransaction();
 
     res.status(200).json({
       success: true,
       message: 'Order cancelled successfully. Stock has been restored.',
-      data: cancelledOrder
+      data: order
     });
   } catch (error) {
+    await session.abortTransaction();
     next(error);
+  } finally {
+    session.endSession();
   }
 };
 

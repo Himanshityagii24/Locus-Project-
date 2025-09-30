@@ -1,54 +1,30 @@
-const pool = require('../config/db');
+const mongoose = require('mongoose');
 
-class User {
-  static async create({ name, email, phone }) {
-    const query = `
-      INSERT INTO users (name, email, phone)
-      VALUES ($1, $2, $3)
-      RETURNING *
-    `;
-    const values = [name, email, phone];
-    const result = await pool.query(query, values);
-    return result.rows[0];
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Name is required'],
+    trim: true
+  },
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+  },
+  phone: {
+    type: String,
+    trim: true
   }
+}, {
+  timestamps: true
+});
 
-  static async findById(id) {
-    const query = 'SELECT * FROM users WHERE id = $1';
-    const result = await pool.query(query, [id]);
-    return result.rows[0];
-  }
 
-  static async findByEmail(email) {
-    const query = 'SELECT * FROM users WHERE email = $1';
-    const result = await pool.query(query, [email]);
-    return result.rows[0];
-  }
+userSchema.index({ email: 1 });
 
-  static async findAll() {
-    const query = 'SELECT * FROM users ORDER BY created_at DESC';
-    const result = await pool.query(query);
-    return result.rows;
-  }
-
-  static async update(id, { name, email, phone }) {
-    const query = `
-      UPDATE users
-      SET name = COALESCE($1, name),
-          email = COALESCE($2, email),
-          phone = COALESCE($3, phone)
-      WHERE id = $4
-      RETURNING *
-    `;
-    const values = [name, email, phone, id];
-    const result = await pool.query(query, values);
-    return result.rows[0];
-  }
-
-  static async delete(id) {
-    const query = 'DELETE FROM users WHERE id = $1 RETURNING *';
-    const result = await pool.query(query, [id]);
-    return result.rows[0];
-  }
-}
+const User = mongoose.model('User', userSchema);
 
 module.exports = User;

@@ -1,6 +1,6 @@
 const MenuItem = require('../models/MenuItem');
 
-// Creating a new menu item
+// Create a new menu item
 const createMenuItem = async (req, res, next) => {
   try {
     const { name, description, price, stock_count } = req.body;
@@ -10,20 +10,6 @@ const createMenuItem = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Name and price are required'
-      });
-    }
-
-    if (price <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Price must be greater than 0'
-      });
-    }
-
-    if (stock_count < 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Stock count cannot be negative'
       });
     }
 
@@ -47,7 +33,7 @@ const createMenuItem = async (req, res, next) => {
 // Get all menu items
 const getAllMenuItems = async (req, res, next) => {
   try {
-    const menuItems = await MenuItem.findAll();
+    const menuItems = await MenuItem.find().sort({ name: 1 });
 
     res.status(200).json({
       success: true,
@@ -62,7 +48,10 @@ const getAllMenuItems = async (req, res, next) => {
 // Get available menu items (in stock only)
 const getAvailableMenuItems = async (req, res, next) => {
   try {
-    const menuItems = await MenuItem.findAvailable();
+    const menuItems = await MenuItem.find({
+      is_available: true,
+      stock_count: { $gt: 0 }
+    }).sort({ name: 1 });
 
     res.status(200).json({
       success: true,
@@ -96,42 +85,24 @@ const getMenuItemById = async (req, res, next) => {
   }
 };
 
-// Updating menu item
+// Update menu item
 const updateMenuItem = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, description, price, stock_count } = req.body;
 
-    // Checking if menu item exists
-    const existingItem = await MenuItem.findById(id);
-    if (!existingItem) {
+    const menuItem = await MenuItem.findByIdAndUpdate(
+      id,
+      { name, description, price, stock_count },
+      { new: true, runValidators: true }
+    );
+
+    if (!menuItem) {
       return res.status(404).json({
         success: false,
         message: 'Menu item not found'
       });
     }
-
-    // Validation
-    if (price !== undefined && price <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Price must be greater than 0'
-      });
-    }
-
-    if (stock_count !== undefined && stock_count < 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Stock count cannot be negative'
-      });
-    }
-
-    const menuItem = await MenuItem.update(id, {
-      name,
-      description,
-      price,
-      stock_count
-    });
 
     res.status(200).json({
       success: true,
@@ -143,7 +114,7 @@ const updateMenuItem = async (req, res, next) => {
   }
 };
 
-// Updating stock 
+// Update stock
 const updateStock = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -157,41 +128,8 @@ const updateStock = async (req, res, next) => {
       });
     }
 
-    if (operation && !['increment', 'decrement'].includes(operation)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Operation must be either "increment" or "decrement"'
-      });
-    }
-
-    const menuItem = await MenuItem.updateStock(
-      id,
-      quantity,
-      operation || 'decrement'
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'Stock updated successfully',
-      data: menuItem
-    });
-  } catch (error) {
-    if (error.message === 'Insufficient stock') {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient stock available'
-      });
-    }
-    next(error);
-  }
-};
-
-// Deleting menu item
-const deleteMenuItem = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
     const menuItem = await MenuItem.findById(id);
+    
     if (!menuItem) {
       return res.status(404).json({
         success: false,
@@ -199,7 +137,44 @@ const deleteMenuItem = async (req, res, next) => {
       });
     }
 
-    await MenuItem.delete(id);
+    if (operation === 'decrement') {
+      if (menuItem.stock_count < quantity) {
+        return res.status(400).json({
+          success: false,
+          message: 'Insufficient stock available'
+        });
+      }
+      menuItem.stock_count -= quantity;
+    } else {
+      menuItem.stock_count += quantity;
+    }
+
+    menuItem.is_available = menuItem.stock_count > 0;
+    await menuItem.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Stock updated successfully',
+      data: menuItem
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Delete menu item
+const deleteMenuItem = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const menuItem = await MenuItem.findByIdAndDelete(id);
+
+    if (!menuItem) {
+      return res.status(404).json({
+        success: false,
+        message: 'Menu item not found'
+      });
+    }
 
     res.status(200).json({
       success: true,

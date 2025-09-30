@@ -69,6 +69,20 @@ app.get('/db-info', async (req, res) => {
   }
 });
 
+// Import routes
+const userRoutes = require('./routes/userRoutes');
+const menuRoutes = require('./routes/menuRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+
+// Mount routes
+app.use('/api/users', userRoutes);
+app.use('/api/menu', menuRoutes);
+app.use('/api/orders', orderRoutes);
+
+// Error handling middleware
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
+
 // Initialize database and start server
 const startServer = async () => {
   try {

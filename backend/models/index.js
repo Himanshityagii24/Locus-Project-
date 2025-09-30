@@ -1,9 +1,14 @@
 const pool = require('../config/db');
 
 const createTables = async () => {
+  const client = await pool.connect();
   try {
+    console.log('📦 Creating database tables...');
+    
+    await client.query('BEGIN');
+
     // Users table
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -12,9 +17,10 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    console.log('  ✓ Users table ready');
 
     // Menu Items table
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS menu_items (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -26,9 +32,10 @@ const createTables = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    console.log('  ✓ Menu Items table ready');
 
     // Orders table
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -41,9 +48,10 @@ const createTables = async () => {
         auto_cancel_at TIMESTAMP
       )
     `);
+    console.log('  ✓ Orders table ready');
 
     // Order Items table
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS order_items (
         id SERIAL PRIMARY KEY,
         order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -53,18 +61,25 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    console.log('  ✓ Order Items table ready');
 
-    // Creating indexes for better performance
-    await pool.query(`
+    // Create indexes for better performance
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
       CREATE INDEX IF NOT EXISTS idx_orders_auto_cancel ON orders(auto_cancel_at);
       CREATE INDEX IF NOT EXISTS idx_menu_items_available ON menu_items(is_available);
     `);
+    console.log('  ✓ Indexes created');
 
-    console.log('All tables created successfully');
+    await client.query('COMMIT');
+    console.log('✅ All tables created successfully\n');
   } catch (error) {
-    console.error(' Error creating tables:', error);
+    await client.query('ROLLBACK');
+    console.error('❌ Error creating tables:', error.message);
+    console.error('💡 Stack trace:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 };
 
